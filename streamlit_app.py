@@ -4,7 +4,7 @@ import os
 import glob
 from ir_system import search_documents
 
-st.set_page_config(page_title="Sistem Temu Kembali Informasi", layout="wide")
+st.set_page_config(page_title="Information Retrieval", layout="wide")
 
 st.title("Sistem Temu Kembali Informasi")
 st.markdown("""Sebuah sistem untuk mencari informasi dari dokumen menggunakan model **Bag-of-Words** dan **TF-IDF**.""")

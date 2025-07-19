@@ -1,6 +1,10 @@
 import re
 import nltk
 import spacy
+import pandas as pd # Tambahkan import pandas di sini
+import os # Tambahkan import os di sini
+import json # Tambahkan import json di sini
+
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 from nltk.tokenize import word_tokenize
@@ -10,34 +14,28 @@ nlp_models = {}
 
 # Coba muat model spaCy untuk bahasa Indonesia
 try:
-    # Coba muat model bahasa Indonesia jika tersedia
     nlp_models['id'] = spacy.load('id_core_news_sm')
     print("Model spaCy untuk bahasa Indonesia berhasil dimuat.")
 except (OSError, ImportError):
     try:
-        # Jika model tidak tersedia, coba gunakan blank model
         nlp_models['id'] = spacy.blank('id')
         print("Menggunakan model spaCy blank untuk bahasa Indonesia. Lemmatization mungkin tidak optimal.")
         print("Untuk hasil terbaik, install model bahasa Indonesia dengan: python -m spacy download id_core_news_sm")
     except (OSError, ImportError):
-        # Jika masih gagal, atur nlp ke None
         nlp_models['id'] = None
         print("Model spaCy untuk bahasa Indonesia tidak tersedia. Lemmatization tidak akan berfungsi.")
         print("Untuk mengaktifkan lemmatization, install spaCy dan model bahasa dengan: pip install spacy dan python -m spacy download id_core_news_sm")
 
 # Coba muat model spaCy untuk bahasa Inggris
 try:
-    # Coba muat model bahasa Inggris jika tersedia
     nlp_models['en'] = spacy.load('en_core_web_sm')
     print("Model spaCy untuk bahasa Inggris berhasil dimuat.")
 except (OSError, ImportError):
     try:
-        # Jika model tidak tersedia, coba gunakan blank model
         nlp_models['en'] = spacy.blank('en')
         print("Menggunakan model spaCy blank untuk bahasa Inggris. Lemmatization mungkin tidak optimal.")
         print("Untuk hasil terbaik, install model bahasa Inggris dengan: python -m spacy download en_core_web_sm")
     except (OSError, ImportError):
-        # Jika masih gagal, atur nlp ke None
         nlp_models['en'] = None
         print("Model spaCy untuk bahasa Inggris tidak tersedia. Lemmatization tidak akan berfungsi.")
         print("Untuk mengaktifkan lemmatization, install spaCy dan model bahasa dengan: pip install spacy dan python -m spacy download en_core_web_sm")
@@ -63,12 +61,10 @@ except LookupError:
 try:
     id_stop_words = set(stopwords.words('indonesian'))
 except LookupError:
-    # Jika tidak tersedia, download stopwords bahasa Indonesia
     try:
         nltk.download('stopwords')
         id_stop_words = set(stopwords.words('indonesian'))
     except:
-        # Jika masih gagal, gunakan daftar stopwords bahasa Indonesia sederhana
         id_stop_words = set([
             'ada', 'adalah', 'adanya', 'adapun', 'agak', 'agaknya', 'agar', 'akan', 'akankah', 'akhir', 
             'akhiri', 'akhirnya', 'aku', 'akulah', 'amat', 'amatlah', 'anda', 'andalah', 'antar', 'antara',
@@ -189,14 +185,27 @@ def preprocess_text(text, language='id', use_spacy=True, apply_stemming=True, ap
         Jika return_details=False: Teks yang telah diproses.
         Jika return_details=True: Dictionary dengan detail setiap tahap preprocessing.
     """
-    if not isinstance(text, str):
-        return "" if not return_details else {
-            "original_text": "",
-            "cleaned_text": "",
-            "tokenized_text": [],
-            "filtered_text": [],
-            "final_text": ""
+    # Define a complete default dictionary for return_details=True
+    default_details = {
+        "original_text": "",
+        "cleaned_text": "",
+        "tokenized_text": [],
+        "filtered_text": [],
+        "stemmed_text": "",
+        "stemmed_tokens": [],
+        "lemmatized_text": "",
+        "lemmatized_tokens": [],
+        "final_text": "",
+        "preprocessing_info": {
+            "language": language,
+            "use_spacy": use_spacy,
+            "apply_stemming": apply_stemming,
+            "apply_lemmatization": apply_lemmatization
         }
+    }
+
+    if not isinstance(text, str):
+        return "" if not return_details else default_details
 
     # Simpan teks asli
     original_text = text
@@ -401,23 +410,21 @@ def save_preprocessing_results(df, text_column, output_path, language='id', use_
     str
         Path ke file hasil preprocessing yang telah disimpan.
     """
-    import pandas as pd
-    import os
-    import json
-    
+    # Pastikan df adalah DataFrame yang valid dan text_column ada
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("Input 'df' harus berupa pandas.DataFrame.")
+    if text_column not in df.columns:
+        raise ValueError(f"Kolom '{text_column}' tidak ditemukan dalam DataFrame.")
+
     # Buat DataFrame baru untuk menyimpan hasil preprocessing
-    results_df = pd.DataFrame()
-    
-    # Salin semua kolom dari DataFrame asli
-    for col in df.columns:
-        results_df[col] = df[col]
+    results_df = df.copy() # Salin DataFrame asli untuk menjaga kolom lain
     
     # Lakukan preprocessing dan tambahkan kolom hasil preprocessing
     preprocessing_results = []
-    for text in df[text_column]:
-        result = preprocess_text(text, language=language, use_spacy=use_spacy, 
-                               apply_stemming=apply_stemming, apply_lemmatization=apply_lemmatization,
-                               return_details=True)
+    for text_value in df[text_column]: # Gunakan nama variabel yang berbeda untuk menghindari konflik dengan parameter
+        result = preprocess_text(text_value, language=language, use_spacy=use_spacy, 
+                                 apply_stemming=apply_stemming, apply_lemmatization=apply_lemmatization,
+                                 return_details=True)
         preprocessing_results.append(result)
     
     # Tambahkan kolom hasil preprocessing ke DataFrame baru
@@ -434,9 +441,12 @@ def save_preprocessing_results(df, text_column, output_path, language='id', use_
     results_df['final_text'] = [result['final_text'] for result in preprocessing_results]
     
     # Tambahkan kolom untuk menunjukkan metode yang digunakan
-    results_df['preprocessing_method'] = ['Stemming' if result['preprocessing_info']['apply_stemming'] and not result['preprocessing_info']['apply_lemmatization'] 
-                                         else 'Lemmatization' if result['preprocessing_info']['apply_lemmatization'] 
-                                         else 'Filtering Only' for result in preprocessing_results]
+    results_df['preprocessing_method'] = [
+        'Lemmatization' if result['preprocessing_info']['apply_lemmatization'] else
+        'Stemming' if result['preprocessing_info']['apply_stemming'] else
+        'Filtering Only'
+        for result in preprocessing_results
+    ]
     
     # Tambahkan informasi preprocessing sebagai metadata
     preprocessing_info = preprocessing_results[0]['preprocessing_info'] if preprocessing_results else {}
@@ -445,7 +455,6 @@ def save_preprocessing_results(df, text_column, output_path, language='id', use_
     if output_format.lower() == 'csv':
         results_df.to_csv(output_path, index=False)
     elif output_format.lower() == 'json':
-        # Untuk JSON, kita bisa menyimpan metadata preprocessing
         with open(output_path, 'w', encoding='utf-8') as f:
             json_data = {
                 'preprocessing_info': preprocessing_info,
@@ -460,3 +469,51 @@ def save_preprocessing_results(df, text_column, output_path, language='id', use_
 # Jalankan contoh jika file ini dijalankan langsung
 if __name__ == "__main__":
     contoh_penggunaan()
+
+    # Contoh penggunaan save_preprocessing_results (membutuhkan DataFrame)
+    # Anda bisa membuat DataFrame dummy untuk pengujian:
+    dummy_data = {
+        'id': [1, 2, 3],
+        'text_data': [
+            "Ini adalah contoh teks Bahasa Indonesia yang akan diproses.",
+            "Another example of English text for natural language processing.",
+            None # Contoh data non-string
+        ],
+        'category': ['A', 'B', 'A']
+    }
+    dummy_df = pd.DataFrame(dummy_data)
+    
+    print("\n===== CONTOH PENGGUNAAN SAVE_PREPROCESSING_RESULTS =====\n")
+
+    # Simpan hasil preprocessing ke CSV
+    try:
+        saved_csv_path = save_preprocessing_results(
+            df=dummy_df,
+            text_column='text_data',
+            output_path='hasil_preprocessing.csv',
+            language='id',
+            apply_stemming=True,
+            apply_lemmatization=False,
+            output_format='csv'
+        )
+        print(f"Hasil preprocessing disimpan di: {saved_csv_path}")
+    except Exception as e:
+        print(f"Terjadi kesalahan saat menyimpan CSV: {e}")
+
+    # Simpan hasil preprocessing ke JSON dengan lemmatization
+    try:
+        saved_json_path = save_preprocessing_results(
+            df=dummy_df,
+            text_column='text_data',
+            output_path='hasil_preprocessing.json',
+            language='en',
+            use_spacy=True,
+            apply_stemming=False,
+            apply_lemmatization=True,
+            output_format='json'
+        )
+        print(f"Hasil preprocessing disimpan di: {saved_json_path}")
+    except Exception as e:
+        print(f"Terjadi kesalahan saat menyimpan JSON: {e}")
+
+    print("\n===== SELESAI PENGUJIAN SAVE_PREPROCESSING_RESULTS =====\n")

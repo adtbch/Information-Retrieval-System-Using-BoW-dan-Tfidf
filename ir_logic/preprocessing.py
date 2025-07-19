@@ -5,12 +5,45 @@ from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 from nltk.tokenize import word_tokenize
 
-# Muat model spaCy untuk bahasa Indonesia
+# Dictionary untuk menyimpan model spaCy berdasarkan bahasa
+nlp_models = {}
+
+# Coba muat model spaCy untuk bahasa Indonesia
 try:
-    nlp = spacy.blank('id')
+    # Coba muat model bahasa Indonesia jika tersedia
+    nlp_models['id'] = spacy.load('id_core_news_sm')
+    print("Model spaCy untuk bahasa Indonesia berhasil dimuat.")
 except (OSError, ImportError):
-    # Jika model tidak ditemukan atau ada kesalahan impor, atur nlp ke None
-    nlp = None
+    try:
+        # Jika model tidak tersedia, coba gunakan blank model
+        nlp_models['id'] = spacy.blank('id')
+        print("Menggunakan model spaCy blank untuk bahasa Indonesia. Lemmatization mungkin tidak optimal.")
+        print("Untuk hasil terbaik, install model bahasa Indonesia dengan: python -m spacy download id_core_news_sm")
+    except (OSError, ImportError):
+        # Jika masih gagal, atur nlp ke None
+        nlp_models['id'] = None
+        print("Model spaCy untuk bahasa Indonesia tidak tersedia. Lemmatization tidak akan berfungsi.")
+        print("Untuk mengaktifkan lemmatization, install spaCy dan model bahasa dengan: pip install spacy dan python -m spacy download id_core_news_sm")
+
+# Coba muat model spaCy untuk bahasa Inggris
+try:
+    # Coba muat model bahasa Inggris jika tersedia
+    nlp_models['en'] = spacy.load('en_core_web_sm')
+    print("Model spaCy untuk bahasa Inggris berhasil dimuat.")
+except (OSError, ImportError):
+    try:
+        # Jika model tidak tersedia, coba gunakan blank model
+        nlp_models['en'] = spacy.blank('en')
+        print("Menggunakan model spaCy blank untuk bahasa Inggris. Lemmatization mungkin tidak optimal.")
+        print("Untuk hasil terbaik, install model bahasa Inggris dengan: python -m spacy download en_core_web_sm")
+    except (OSError, ImportError):
+        # Jika masih gagal, atur nlp ke None
+        nlp_models['en'] = None
+        print("Model spaCy untuk bahasa Inggris tidak tersedia. Lemmatization tidak akan berfungsi.")
+        print("Untuk mengaktifkan lemmatization, install spaCy dan model bahasa dengan: pip install spacy dan python -m spacy download en_core_web_sm")
+
+# Untuk kompatibilitas dengan kode lama
+nlp = nlp_models.get('id')
 
 # Unduh data NLTK yang diperlukan
 try:
@@ -130,7 +163,7 @@ stemmer = PorterStemmer()
 # Gabungkan stopwords bahasa Inggris dan Indonesia
 stop_words = set(stopwords.words('english')).union(id_stop_words)
 
-def preprocess_text(text, language='id', use_spacy=True):
+def preprocess_text(text, language='id', use_spacy=True, apply_stemming=True, apply_lemmatization=False, return_details=False):
     """Melakukan pra-pemrosesan teks untuk information retrieval.
 
     Parameter:
@@ -139,26 +172,291 @@ def preprocess_text(text, language='id', use_spacy=True):
         Teks yang akan diproses.
     language : str, optional
         Bahasa dari teks. Pilihan: 'en', 'id'. Default adalah 'id'.
+    use_spacy : bool, optional
+        Apakah menggunakan spaCy untuk pemrosesan. Default adalah True.
+    apply_stemming : bool, optional
+        Apakah menerapkan stemming pada token. Default adalah True.
+    apply_lemmatization : bool, optional
+        Apakah menerapkan lemmatization pada token. Default adalah False.
+        Catatan: Jika apply_lemmatization=True, apply_stemming akan diabaikan.
+    return_details : bool, optional
+        Jika True, mengembalikan dictionary dengan detail setiap tahap preprocessing.
+        Jika False, hanya mengembalikan teks akhir yang telah diproses.
 
     Mengembalikan:
     --------
-    str
-        Teks yang telah diproses.
+    str atau dict
+        Jika return_details=False: Teks yang telah diproses.
+        Jika return_details=True: Dictionary dengan detail setiap tahap preprocessing.
     """
     if not isinstance(text, str):
-        return ""
+        return "" if not return_details else {
+            "original_text": "",
+            "cleaned_text": "",
+            "tokenized_text": [],
+            "filtered_text": [],
+            "final_text": ""
+        }
+
+    # Simpan teks asli
+    original_text = text
 
     # Hapus tag HTML dan karakter non-alfanumerik
-    text = re.sub(r'<.*?>', '', text)
-    text = re.sub(r'[^\w\s]', '', text)
-    text = text.lower()
+    cleaned_text = re.sub(r'<.*?>', '', text)
+    cleaned_text = re.sub(r'[^\w\s]', '', cleaned_text)
+    cleaned_text = cleaned_text.lower()
 
-    tokens = word_tokenize(text)
-
+    # Pilih model spaCy berdasarkan bahasa
+    current_nlp = nlp_models.get(language)
+    
     # Pilih stopwords berdasarkan bahasa yang dipilih
     current_stop_words = id_stop_words if language == 'id' else set(stopwords.words('english'))
 
-    # Hapus stop words
-    processed_tokens = [w for w in tokens if w not in current_stop_words]
+    # Variabel untuk menyimpan token di setiap tahap
+    tokenized_tokens = []
+    filtered_tokens = []
+    stemmed_tokens = []
+    lemmatized_tokens = []
+    final_tokens = []
 
-    return ' '.join(processed_tokens)
+    # Gunakan pendekatan tokenisasi NLTK untuk tokenisasi dasar
+    tokenized_tokens = word_tokenize(cleaned_text)
+    
+    # Hapus stop words
+    filtered_tokens = [w for w in tokenized_tokens if w not in current_stop_words]
+    
+    # Simpan versi token yang difilter (tanpa stemming/lemmatization)
+    filtered_only_tokens = filtered_tokens.copy()
+    
+    # Terapkan stemming jika diminta
+    if apply_stemming:
+        stemmed_tokens = [stemmer.stem(token) for token in filtered_tokens]
+    else:
+        stemmed_tokens = filtered_tokens.copy()
+    
+    # Terapkan lemmatization jika diminta dan spaCy tersedia
+    if apply_lemmatization and current_nlp is not None and use_spacy:
+        try:
+            # Proses teks dengan spaCy
+            doc = current_nlp(cleaned_text)
+            # Ambil lemma untuk token yang tidak dalam stopwords
+            lemmatized_tokens = [token.lemma_ for token in doc if token.text.lower() not in current_stop_words]
+            
+            # Jika tidak ada token yang diproses atau model blank tidak mendukung lemmatization
+            if not lemmatized_tokens or all(token == '' for token in lemmatized_tokens):
+                raise ValueError("Lemmatization tidak menghasilkan output yang valid")
+        except Exception as e:
+            print(f"Peringatan: Lemmatization gagal ({str(e)}). Menggunakan metode alternatif.")
+            # Fallback ke filtered tokens
+            lemmatized_tokens = filtered_tokens.copy()
+    else:
+        lemmatized_tokens = filtered_tokens.copy()
+    
+    # Tentukan token final berdasarkan prioritas
+    if apply_lemmatization and lemmatized_tokens != filtered_tokens:
+        # Jika lemmatization berhasil, gunakan hasil lemmatization
+        final_tokens = lemmatized_tokens
+    elif apply_stemming:
+        # Jika lemmatization tidak diminta atau gagal, dan stemming diminta, gunakan hasil stemming
+        final_tokens = stemmed_tokens
+    else:
+        # Jika tidak ada yang diminta atau keduanya gagal, gunakan token yang difilter
+        final_tokens = filtered_tokens.copy()
+
+    # Gabungkan token menjadi teks akhir
+    final_text = ' '.join(final_tokens)
+
+    # Gabungkan token menjadi teks untuk setiap tahap
+    stemmed_text = ' '.join(stemmed_tokens)
+    lemmatized_text = ' '.join(lemmatized_tokens)
+    filtered_only_text = ' '.join(filtered_only_tokens)
+    
+    # Kembalikan hasil sesuai dengan parameter return_details
+    if return_details:
+        return {
+            "original_text": original_text,
+            "cleaned_text": cleaned_text,
+            "tokenized_text": tokenized_tokens,
+            "filtered_text": filtered_only_tokens,
+            "stemmed_text": stemmed_text,
+            "stemmed_tokens": stemmed_tokens,
+            "lemmatized_text": lemmatized_text,
+            "lemmatized_tokens": lemmatized_tokens,
+            "final_text": final_text,
+            "preprocessing_info": {
+                "language": language,
+                "use_spacy": use_spacy,
+                "apply_stemming": apply_stemming,
+                "apply_lemmatization": apply_lemmatization
+            }
+        }
+    else:
+        return final_text
+
+
+def contoh_penggunaan():
+    """Contoh penggunaan fungsi preprocess_text dengan berbagai opsi.
+    
+    Catatan:
+    -------
+    Untuk lemmatization yang optimal, pastikan model spaCy yang sesuai telah diinstal:
+    - Untuk bahasa Indonesia: python -m spacy download id_core_news_sm
+    - Untuk bahasa Inggris: python -m spacy download en_core_web_sm
+    
+    Jika model tidak tersedia, sistem akan menggunakan model blank yang mungkin tidak
+    mendukung lemmatization dengan baik, atau akan kembali ke metode tokenisasi NLTK.
+    """
+    # Contoh teks dalam bahasa Indonesia
+    teks_id = "Saya sedang belajar pemrosesan bahasa alami menggunakan Python. Ini sangat menyenangkan!"
+    
+    # Contoh teks dalam bahasa Inggris
+    teks_en = "I am learning natural language processing using Python. It's very exciting!"
+    
+    print("\n===== CONTOH PENGGUNAAN PREPROCESS_TEXT =====\n")
+    
+    # Preprocessing dasar (tanpa stemming atau lemmatization)
+    print("[Bahasa Indonesia] Preprocessing dasar:")
+    hasil_id_dasar = preprocess_text(teks_id, language='id', apply_stemming=False, apply_lemmatization=False)
+    print(f"Input: {teks_id}")
+    print(f"Output: {hasil_id_dasar}\n")
+    
+    # Preprocessing dengan stemming
+    print("[Bahasa Indonesia] Preprocessing dengan stemming:")
+    hasil_id_stem = preprocess_text(teks_id, language='id', apply_stemming=True, apply_lemmatization=False)
+    print(f"Input: {teks_id}")
+    print(f"Output: {hasil_id_stem}\n")
+    
+    # Preprocessing dengan lemmatization
+    print("[Bahasa Indonesia] Preprocessing dengan lemmatization:")
+    hasil_id_lemma = preprocess_text(teks_id, language='id', apply_stemming=False, apply_lemmatization=True)
+    print(f"Input: {teks_id}")
+    print(f"Output: {hasil_id_lemma}")
+    print("Catatan: Jika output kosong atau tidak optimal, pastikan model spaCy 'id_core_news_sm' telah diinstal.\n")
+    
+    # Preprocessing dasar untuk bahasa Inggris
+    print("[Bahasa Inggris] Preprocessing dasar:")
+    hasil_en_dasar = preprocess_text(teks_en, language='en', apply_stemming=False, apply_lemmatization=False)
+    print(f"Input: {teks_en}")
+    print(f"Output: {hasil_en_dasar}\n")
+    
+    # Preprocessing dengan stemming untuk bahasa Inggris
+    print("[Bahasa Inggris] Preprocessing dengan stemming:")
+    hasil_en_stem = preprocess_text(teks_en, language='en', apply_stemming=True, apply_lemmatization=False)
+    print(f"Input: {teks_en}")
+    print(f"Output: {hasil_en_stem}\n")
+    
+    # Preprocessing dengan lemmatization untuk bahasa Inggris
+    print("[Bahasa Inggris] Preprocessing dengan lemmatization:")
+    hasil_en_lemma = preprocess_text(teks_en, language='en', apply_stemming=False, apply_lemmatization=True)
+    print(f"Input: {teks_en}")
+    print(f"Output: {hasil_en_lemma}")
+    print("Catatan: Jika output kosong atau tidak optimal, pastikan model spaCy 'en_core_web_sm' telah diinstal.\n")
+    
+    # Perbandingan stemming vs lemmatization untuk bahasa Indonesia
+    print("[Bahasa Indonesia] Perbandingan stemming vs lemmatization:")
+    teks_id_perbandingan = "Saya membaca buku-buku pembelajaran dan mempelajari materi pemrograman"
+    hasil_id_stem_perbandingan = preprocess_text(teks_id_perbandingan, language='id', apply_stemming=True, apply_lemmatization=False)
+    hasil_id_lemma_perbandingan = preprocess_text(teks_id_perbandingan, language='id', apply_stemming=False, apply_lemmatization=True)
+    print(f"Input: {teks_id_perbandingan}")
+    print(f"Stemming: {hasil_id_stem_perbandingan}")
+    print(f"Lemmatization: {hasil_id_lemma_perbandingan}\n")
+    
+    # Perbandingan stemming vs lemmatization untuk bahasa Inggris
+    print("[Bahasa Inggris] Perbandingan stemming vs lemmatization:")
+    teks_en_perbandingan = "I am running and jumping while studying programming languages"
+    hasil_en_stem_perbandingan = preprocess_text(teks_en_perbandingan, language='en', apply_stemming=True, apply_lemmatization=False)
+    hasil_en_lemma_perbandingan = preprocess_text(teks_en_perbandingan, language='en', apply_stemming=False, apply_lemmatization=True)
+    print(f"Input: {teks_en_perbandingan}")
+    print(f"Stemming: {hasil_en_stem_perbandingan}")
+    print(f"Lemmatization: {hasil_en_lemma_perbandingan}\n")
+    
+    print("===== SELESAI =====\n")
+
+
+def save_preprocessing_results(df, text_column, output_path, language='id', use_spacy=True, apply_stemming=True, apply_lemmatization=False, output_format='csv'):
+    """
+    Menyimpan hasil preprocessing dari DataFrame ke file dengan kolom terpisah untuk setiap tahap preprocessing.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame yang berisi data yang akan diproses.
+    text_column : str
+        Nama kolom yang berisi teks yang akan diproses.
+    output_path : str
+        Path untuk menyimpan file hasil preprocessing.
+    language : str, optional
+        Bahasa dari teks. Pilihan: 'en', 'id'. Default adalah 'id'.
+    use_spacy : bool, optional
+        Apakah menggunakan spaCy untuk pemrosesan. Default adalah True.
+    apply_stemming : bool, optional
+        Apakah menerapkan stemming pada token. Default adalah True.
+    apply_lemmatization : bool, optional
+        Apakah menerapkan lemmatization pada token. Default adalah False.
+    output_format : str, optional
+        Format output file. Pilihan: 'csv', 'json'. Default adalah 'csv'.
+    
+    Returns:
+    --------
+    str
+        Path ke file hasil preprocessing yang telah disimpan.
+    """
+    import pandas as pd
+    import os
+    import json
+    
+    # Buat DataFrame baru untuk menyimpan hasil preprocessing
+    results_df = pd.DataFrame()
+    
+    # Salin semua kolom dari DataFrame asli
+    for col in df.columns:
+        results_df[col] = df[col]
+    
+    # Lakukan preprocessing dan tambahkan kolom hasil preprocessing
+    preprocessing_results = []
+    for text in df[text_column]:
+        result = preprocess_text(text, language=language, use_spacy=use_spacy, 
+                               apply_stemming=apply_stemming, apply_lemmatization=apply_lemmatization,
+                               return_details=True)
+        preprocessing_results.append(result)
+    
+    # Tambahkan kolom hasil preprocessing ke DataFrame baru
+    results_df['original_text'] = [result['original_text'] for result in preprocessing_results]
+    results_df['cleaned_text'] = [result['cleaned_text'] for result in preprocessing_results]
+    results_df['tokenized_text'] = [' '.join(result['tokenized_text']) for result in preprocessing_results]
+    results_df['filtered_text'] = [' '.join(result['filtered_text']) for result in preprocessing_results]
+    
+    # Tambahkan kolom stemming dan lemmatization
+    results_df['stemmed_text'] = [result['stemmed_text'] for result in preprocessing_results]
+    results_df['lemmatized_text'] = [result['lemmatized_text'] for result in preprocessing_results]
+    
+    # Tambahkan kolom final text (hasil akhir preprocessing)
+    results_df['final_text'] = [result['final_text'] for result in preprocessing_results]
+    
+    # Tambahkan kolom untuk menunjukkan metode yang digunakan
+    results_df['preprocessing_method'] = ['Stemming' if result['preprocessing_info']['apply_stemming'] and not result['preprocessing_info']['apply_lemmatization'] 
+                                         else 'Lemmatization' if result['preprocessing_info']['apply_lemmatization'] 
+                                         else 'Filtering Only' for result in preprocessing_results]
+    
+    # Tambahkan informasi preprocessing sebagai metadata
+    preprocessing_info = preprocessing_results[0]['preprocessing_info'] if preprocessing_results else {}
+    
+    # Simpan hasil preprocessing ke file
+    if output_format.lower() == 'csv':
+        results_df.to_csv(output_path, index=False)
+    elif output_format.lower() == 'json':
+        # Untuk JSON, kita bisa menyimpan metadata preprocessing
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json_data = {
+                'preprocessing_info': preprocessing_info,
+                'data': results_df.to_dict(orient='records')
+            }
+            json.dump(json_data, f, ensure_ascii=False, indent=2)
+    else:
+        raise ValueError(f"Format output '{output_format}' tidak didukung. Gunakan 'csv' atau 'json'.")
+    
+    return output_path
+
+# Jalankan contoh jika file ini dijalankan langsung
+if __name__ == "__main__":
+    contoh_penggunaan()

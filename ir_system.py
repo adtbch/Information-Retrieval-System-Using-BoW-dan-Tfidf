@@ -4,9 +4,9 @@ from ir_logic.caching import cache
 from ir_logic.vectorization import vectorize_bow, vectorize_tfidf, search
 from ir_logic.evaluation import calculate_metrics
 
-def search_documents(filepath, query, search_column, model_type, language='auto', use_spacy=True):
-    # Buat kunci cache unik untuk dataset, kolom, dan model
-    cache_key = f"{filepath}_{search_column}_{model_type}_{language}"
+def search_documents(filepath, query, search_column, model_type, language='auto', use_spacy=True, apply_stemming=True, apply_lemmatization=False):
+    # Buat kunci cache unik untuk dataset, kolom, model, dan opsi preprocessing
+    cache_key = f"{filepath}_{search_column}_{model_type}_{language}_{use_spacy}_{apply_stemming}_{apply_lemmatization}"
 
     # Muat dan proses dataset jika tidak ada di cache
     if 'df' not in cache.get(cache_key, {}):
@@ -20,7 +20,7 @@ def search_documents(filepath, query, search_column, model_type, language='auto'
         if search_column not in df.columns:
             raise ValueError(f"Column '{search_column}' not found in the dataset.")
 
-        df['processed_text'] = df[search_column].apply(lambda x: preprocess_text(x, language=language, use_spacy=use_spacy))
+        df['processed_text'] = df[search_column].apply(lambda x: preprocess_text(x, language=language, use_spacy=use_spacy, apply_stemming=apply_stemming, apply_lemmatization=apply_lemmatization))
 
         # Inisialisasi cache untuk kunci ini
         cache[cache_key] = {'df': df}
@@ -42,7 +42,7 @@ def search_documents(filepath, query, search_column, model_type, language='auto'
         doc_matrix = cache[cache_key]['doc_matrix']
 
     # Pra-pemrosesan dan vektorisasi kueri
-    processed_query = preprocess_text(query, language=language, use_spacy=use_spacy)
+    processed_query = preprocess_text(query, language=language, use_spacy=use_spacy, apply_stemming=apply_stemming, apply_lemmatization=apply_lemmatization)
     query_vector = vectorizer.transform([processed_query])
 
     # Lakukan pencarian
